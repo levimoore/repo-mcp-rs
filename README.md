@@ -89,6 +89,23 @@ For a repo registered as `myapp`:
 - Each chunk has a 384-dimensional embedding (all-MiniLM-L6-v2 via ONNX)
 - Files are watched and re-indexed on save automatically
 
+## Quick Install (prebuilt binary)
+
+```bash
+# Download the binary
+curl -L https://github.com/levimoore/repo-mcp-rs/releases/download/v0.1.0/repo-mcp-arm64 \
+  -o /usr/local/bin/repo-mcp
+
+# Make it executable
+chmod +x /usr/local/bin/repo-mcp
+
+# Remove Gatekeeper quarantine (required for unsigned binaries)
+xattr -dr com.apple.quarantine /usr/local/bin/repo-mcp
+
+# Verify it works
+repo-mcp --help
+```
+
 ## Building a distributable binary
 
 ```bash
