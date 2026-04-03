@@ -13,7 +13,6 @@ only the 3-5 relevant functions — typically 95%+ token reduction.
 ## Prerequisites
 
 - Rust (https://rustup.rs)
-- ripgrep — `brew install ripgrep`
 
 ## Install
 
@@ -99,5 +98,4 @@ cargo build --release
 
 The binary is self-contained. The only runtime requirements on a target machine:
 - macOS (arm64 or x86_64)
-- `ripgrep` on PATH (for the `search` tool)
 - Internet access on first run (to download the embedding model)
