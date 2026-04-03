@@ -1,0 +1,62 @@
+[package]
+name = "repo-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "repo-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP server + SSE
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["cors"] }
+tokio-stream = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database — SQLite compiled into the binary, no external dep
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Local embeddings — fully self-contained, downloads model on first run
+# fastembed 5.x pins to ort =2.0.0-rc.11 exactly; we add TLS so it can download
+fastembed = "5"
+ort = { version = "=2.0.0-rc.11", features = ["download-binaries", "tls-rustls"] }
+
+# Code parsing
+tree-sitter = "0.22"
+tree-sitter-typescript = "0.21"
+tree-sitter-javascript = "0.21"
+tree-sitter-python = "0.21"
+tree-sitter-rust = "0.21"
+tree-sitter-go = "0.21"
+
+# File watching (uses FSEvents on macOS)
+notify = "6"
+
+# Directory walking
+walkdir = "2"
+
+# Error handling
+anyhow = "1"
+
+# Utilities
+dirs = "5"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ctrlc = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
