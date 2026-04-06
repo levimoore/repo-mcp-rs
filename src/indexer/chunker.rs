@@ -25,9 +25,9 @@ pub enum Language {
 
 pub fn detect_language(ext: &str) -> Option<Language> {
     match ext.to_lowercase().as_str() {
-        "ts"                => Some(Language::TypeScript),
+        "ts" | "gts"        => Some(Language::TypeScript),
         "tsx"               => Some(Language::Tsx),
-        "js" | "mjs" | "cjs" | "jsx" => Some(Language::JavaScript),
+        "js" | "mjs" | "cjs" | "jsx" | "gjs" => Some(Language::JavaScript),
         "py" | "pyi"        => Some(Language::Python),
         "rs"                => Some(Language::Rust),
         "go"                => Some(Language::Go),
