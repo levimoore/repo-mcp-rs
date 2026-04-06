@@ -134,10 +134,11 @@ pub fn all_tools(repos: &[RepoConfig]) -> Vec<Tool> {
             Tool {
                 name: format!("{n}__read_file"),
                 description: format!(
-                    "Read a file from {n} with line numbers. Files over 200 lines are \
-                     automatically truncated — you get the first 100 lines plus an index-powered \
-                     symbol map of the rest (names, kinds, line ranges) so you can make a \
-                     targeted follow-up read."
+                    "Read a file from {n} with line numbers. Supports start_line/end_line for \
+                     targeted range reads — use these to read large files in chunks. Without a \
+                     range, files over 200 lines are automatically truncated: you get the first \
+                     100 lines plus an index-powered symbol map of the rest (names, kinds, line \
+                     ranges) so you can make a targeted follow-up read."
                 ),
                 input_schema: json!({
                     "type": "object",
@@ -145,6 +146,14 @@ pub fn all_tools(repos: &[RepoConfig]) -> Vec<Tool> {
                         "path": {
                             "type": "string",
                             "description": "File path relative to repo root"
+                        },
+                        "start_line": {
+                            "type": "number",
+                            "description": "First line to read (1-indexed, inclusive). Omit to start from the beginning."
+                        },
+                        "end_line": {
+                            "type": "number",
+                            "description": "Last line to read (1-indexed, inclusive). Omit to read to end (subject to truncation when no range is given)."
                         }
                     },
                     "required": ["path"]
@@ -424,14 +433,29 @@ async fn read_file(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<
     };
 
     let lines: Vec<&str> = source.lines().collect();
+    let total = lines.len();
 
-    if lines.len() <= FULL_THRESHOLD {
+    // If a range is requested, return exactly those lines (no truncation).
+    if args["start_line"].is_number() || args["end_line"].is_number() {
+        let start = args["start_line"].as_u64().map(|n| (n as usize).saturating_sub(1)).unwrap_or(0);
+        let end   = args["end_line"].as_u64().map(|n| (n as usize).min(total)).unwrap_or(total);
+
+        if start >= total {
+            return Ok(tool_error(&format!(
+                "start_line {} is beyond end of file ({} lines)", start + 1, total
+            )));
+        }
+        let slice = &lines[start..end];
+        return Ok(tool_text(numbered(slice, start + 1)));
+    }
+
+    if total <= FULL_THRESHOLD {
         return Ok(tool_text(numbered(&lines, 1)));
     }
 
     // Large file: head + index-powered symbol map of the tail
     let head      = numbered(&lines[..HEAD_LINES], 1);
-    let remaining = lines.len() - HEAD_LINES;
+    let remaining = total - HEAD_LINES;
 
     // Pull tail symbols from the index
     let tail_symbols: Vec<String> = state.db
@@ -456,7 +480,7 @@ async fn read_file(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<
     let summary = format!(
         "\n── {} more lines ({} total) ──────────────────────────────\n\
          Symbols in remaining lines (use find_symbol or read_lines for details):\n{}",
-        remaining, lines.len(), tail_section
+        remaining, total, tail_section
     );
 
     Ok(tool_text(format!("{}{}", head, summary)))
