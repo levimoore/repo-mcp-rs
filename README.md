@@ -40,9 +40,8 @@ cargo build --release
 sudo cp target/release/repo-mcp /usr/local/bin/
 ```
 
-The embedding model (~90 MB, all-MiniLM-L6-v2) downloads automatically on
-first `repo-mcp index` and is cached at `~/.repo-mcp/models/`.
-After that, everything runs fully offline.
+The embedding model downloads automatically on first `repo-mcp index` and is
+cached at `~/.cache/huggingface`. After that, everything runs fully offline.
 
 ## Usage
 
@@ -99,11 +98,73 @@ For a repo registered as `myapp`:
 | `myapp__get_tree` | Directory structure | low |
 | `myapp__search` | ripgrep text/regex search | low |
 
+## Choosing an embedding model
+
+repo-mcp uses [fastembed](https://github.com/Anush008/fastembed-rs) for local,
+offline embeddings. The model is configurable — you can set a persistent default
+or override it for a single index run.
+
+The model name is the PascalCase enum variant name from fastembed's
+`EmbeddingModel` and is matched **case-insensitively**, so `BGESmallENV15`,
+`bgesmallenv15`, and `BGESMALLENV15` all work.
+
+### Recommended models for code search
+
+| Model | Dims | Download | Notes |
+|-------|------|----------|-------|
+| `JinaEmbeddingsV2BaseCode` | 768 | ~320 MB | **Best for code.** Trained on code + natural language pairs. 8192-token context window handles large functions without truncation. |
+| `BGESmallENV15` | 384 | ~130 MB | Good general-purpose retrieval. Outperforms MiniLM on MTEB benchmarks. Fast and memory-efficient. |
+| `AllMiniLML6V2` | 384 | ~90 MB | **Default.** Solid general baseline. Widely used, very fast. Switch to `JinaEmbeddingsV2BaseCode` for better code search. |
+| `NomicEmbedTextV15` | 768 | ~275 MB | Strong NL retrieval with 8192-token context. Good if your codebase has heavy inline documentation. |
+| `BGELargeENV15` | 1024 | ~1.3 GB | Highest quality general retrieval in the list. Significantly slower and larger — worth it only for large, infrequently re-indexed repos. |
+
+The default model is `AllMiniLML6V2` — a fast, reliable baseline. For dedicated
+code search, switching to `JinaEmbeddingsV2BaseCode` is recommended.
+`BGESmallENV15` is a good middle ground if you want better retrieval without
+the larger download.
+
+The full list of supported models is available in the
+[fastembed docs](https://docs.rs/fastembed/latest/fastembed/enum.EmbeddingModel.html).
+
+### Setting the model
+
+**Persist a model in config** (used for all future `index` and `start` runs):
+
+```bash
+repo-mcp config set embedding_model JinaEmbeddingsV2BaseCode
+```
+
+**Override for a single index run** without changing the config:
+
+```bash
+repo-mcp index --model JinaEmbeddingsV2BaseCode
+repo-mcp index myapp --model BGESmallENV15
+```
+
+**Check the current model:**
+
+```bash
+repo-mcp config show
+repo-mcp status        # also shows the configured model when the server is running
+```
+
+### ⚠️ Changing models requires a full re-index
+
+Embedding vectors are only comparable within the same model. If you change the
+model, you **must** re-index before starting the server, otherwise semantic
+search will produce incorrect results:
+
+```bash
+repo-mcp config set embedding_model JinaEmbeddingsV2BaseCode
+repo-mcp index        # re-index everything with the new model
+repo-mcp start
+```
+
 ## What's in the index
 
 - SQLite database at `~/.repo-mcp/index.db`
 - Every function, class, method, type, and interface is a chunk
-- Each chunk has a 384-dimensional embedding (all-MiniLM-L6-v2 via ONNX)
+- Each chunk has a vector embedding whose dimension depends on the chosen model
 - Files are watched and re-indexed on save automatically
 
 ## Building a distributable binary
