@@ -12,6 +12,8 @@ pub struct RepoConfig {
 pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
     #[serde(default)]
     pub repos: Vec<RepoConfig>,
 }
@@ -20,10 +22,15 @@ fn default_port() -> u16 {
     3742
 }
 
+fn default_embedding_model() -> String {
+    "AllMiniLML6V2".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             port: default_port(),
+            embedding_model: default_embedding_model(),
             repos: vec![],
         }
     }

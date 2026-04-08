@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::sync::Mutex;
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
@@ -50,27 +50,30 @@ const MIGRATIONS: &[&str] = &[
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
-    pub _id:        i64,
-    pub repo_name:  String,
-    pub kind:       String,
-    pub name:       Option<String>,
+    pub _id: i64,
+    pub repo_name: String,
+    pub kind: String,
+    pub name: Option<String>,
     pub start_line: u32,
-    pub end_line:   u32,
-    pub content:    String,
-    pub signature:  Option<String>,
-    pub rel_path:   String,
+    pub end_line: u32,
+    pub content: String,
+    pub signature: Option<String>,
+    pub rel_path: String,
 }
 
 // ─── In-memory vector store ───────────────────────────────────────────────────
 
 pub struct VectorStore {
-    chunk_ids:  Vec<i64>,
+    chunk_ids: Vec<i64>,
     embeddings: Vec<Vec<f32>>,
 }
 
 impl VectorStore {
     pub fn new() -> Self {
-        Self { chunk_ids: vec![], embeddings: vec![] }
+        Self {
+            chunk_ids: vec![],
+            embeddings: vec![],
+        }
     }
 
     pub fn insert(&mut self, chunk_id: i64, embedding: Vec<f32>) {
@@ -93,7 +96,9 @@ impl VectorStore {
 
     pub fn search(&self, query: &[f32], top_k: usize) -> Vec<(i64, f32)> {
         let q = normalize(query.to_vec());
-        let mut scores: Vec<(i64, f32)> = self.chunk_ids.iter()
+        let mut scores: Vec<(i64, f32)> = self
+            .chunk_ids
+            .iter()
             .zip(self.embeddings.iter())
             .map(|(&id, emb)| (id, dot(&q, emb)))
             .collect();
@@ -102,12 +107,16 @@ impl VectorStore {
         scores
     }
 
-    pub fn len(&self) -> usize { self.chunk_ids.len() }
+    pub fn len(&self) -> usize {
+        self.chunk_ids.len()
+    }
 }
 
 fn normalize(mut v: Vec<f32>) -> Vec<f32> {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm > 0.0 { v.iter_mut().for_each(|x| *x /= norm); }
+    if norm > 0.0 {
+        v.iter_mut().for_each(|x| *x /= norm);
+    }
     v
 }
 
@@ -141,7 +150,9 @@ impl Database {
         for migration in MIGRATIONS {
             let _ = conn.execute_batch(migration);
         }
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     // ── Repos ────────────────────────────────────────────────────────────────
@@ -192,9 +203,7 @@ impl Database {
 
     pub fn file_mtime(&self, repo_id: i64, rel_path: &str) -> Result<Option<i64>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT mtime FROM files WHERE repo_id=?1 AND rel_path=?2"
-        )?;
+        let mut stmt = conn.prepare("SELECT mtime FROM files WHERE repo_id=?1 AND rel_path=?2")?;
         let mut rows = stmt.query(params![repo_id, rel_path])?;
         Ok(rows.next()?.map(|r| r.get(0).unwrap()))
     }
@@ -202,7 +211,8 @@ impl Database {
     pub fn file_chunk_ids(&self, file_id: i64) -> Result<Vec<i64>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT id FROM chunks WHERE file_id=?1")?;
-        let ids = stmt.query_map(params![file_id], |r| r.get(0))?
+        let ids = stmt
+            .query_map(params![file_id], |r| r.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ids)
     }
@@ -227,7 +237,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT f.summary FROM files f
              JOIN repos r ON r.id = f.repo_id
-             WHERE r.name=?1 AND f.rel_path=?2"
+             WHERE r.name=?1 AND f.rel_path=?2",
         )?;
         let mut rows = stmt.query(params![repo_name, rel_path])?;
         Ok(rows.next()?.and_then(|r| r.get(0).ok()))
@@ -267,13 +277,10 @@ impl Database {
 
     pub fn load_all_vectors(&self) -> Result<VectorStore> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL"
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL")?;
         let mut store = VectorStore::new();
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
         for row in rows {
             let (id, blob) = row?;
             store.insert(id, blob_to_embedding(&blob));
@@ -288,19 +295,19 @@ impl Database {
                     c.content, c.signature, f.rel_path
              FROM chunks c
              JOIN files f ON f.id = c.file_id
-             WHERE c.id = ?1"
+             WHERE c.id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         Ok(rows.next()?.map(|r| Chunk {
-            _id:        r.get(0).unwrap(),
-            repo_name:  r.get(1).unwrap(),
-            kind:       r.get(2).unwrap(),
-            name:       r.get(3).unwrap(),
+            _id: r.get(0).unwrap(),
+            repo_name: r.get(1).unwrap(),
+            kind: r.get(2).unwrap(),
+            name: r.get(3).unwrap(),
             start_line: r.get::<_, u32>(4).unwrap(),
-            end_line:   r.get::<_, u32>(5).unwrap(),
-            content:    r.get(6).unwrap(),
-            signature:  r.get(7).unwrap(),
-            rel_path:   r.get(8).unwrap(),
+            end_line: r.get::<_, u32>(5).unwrap(),
+            content: r.get(6).unwrap(),
+            signature: r.get(7).unwrap(),
+            rel_path: r.get(8).unwrap(),
         }))
     }
 
@@ -311,19 +318,23 @@ impl Database {
                     c.content, c.signature, f.rel_path
              FROM chunks c
              JOIN files f ON f.id = c.file_id
-             WHERE c.repo_name=?1 AND LOWER(c.name)=LOWER(?2)"
+             WHERE c.repo_name=?1 AND LOWER(c.name)=LOWER(?2)",
         )?;
-        let rows = stmt.query_map(params![repo_name, name], |r| Ok(Chunk {
-            _id:        r.get(0)?,
-            repo_name:  r.get(1)?,
-            kind:       r.get(2)?,
-            name:       r.get(3)?,
-            start_line: r.get(4)?,
-            end_line:   r.get(5)?,
-            content:    r.get(6)?,
-            signature:  r.get(7)?,
-            rel_path:   r.get(8)?,
-        }))?.collect::<Result<Vec<_>, _>>()?;
+        let rows = stmt
+            .query_map(params![repo_name, name], |r| {
+                Ok(Chunk {
+                    _id: r.get(0)?,
+                    repo_name: r.get(1)?,
+                    kind: r.get(2)?,
+                    name: r.get(3)?,
+                    start_line: r.get(4)?,
+                    end_line: r.get(5)?,
+                    content: r.get(6)?,
+                    signature: r.get(7)?,
+                    rel_path: r.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
@@ -340,19 +351,23 @@ impl Database {
              WHERE c.repo_name=?1
                AND c.content LIKE ?2
                AND (c.name IS NULL OR LOWER(c.name) != LOWER(?3))
-             ORDER BY f.rel_path, c.start_line"
+             ORDER BY f.rel_path, c.start_line",
         )?;
-        let rows = stmt.query_map(params![repo_name, pattern, symbol], |r| Ok(Chunk {
-            _id:        r.get(0)?,
-            repo_name:  r.get(1)?,
-            kind:       r.get(2)?,
-            name:       r.get(3)?,
-            start_line: r.get(4)?,
-            end_line:   r.get(5)?,
-            content:    r.get(6)?,
-            signature:  r.get(7)?,
-            rel_path:   r.get(8)?,
-        }))?.collect::<Result<Vec<_>, _>>()?;
+        let rows = stmt
+            .query_map(params![repo_name, pattern, symbol], |r| {
+                Ok(Chunk {
+                    _id: r.get(0)?,
+                    repo_name: r.get(1)?,
+                    kind: r.get(2)?,
+                    name: r.get(3)?,
+                    start_line: r.get(4)?,
+                    end_line: r.get(5)?,
+                    content: r.get(6)?,
+                    signature: r.get(7)?,
+                    rel_path: r.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
@@ -364,30 +379,35 @@ impl Database {
              FROM chunks c
              JOIN files f ON f.id = c.file_id
              WHERE c.repo_name=?1 AND f.rel_path=?2
-             ORDER BY c.start_line"
+             ORDER BY c.start_line",
         )?;
-        let rows = stmt.query_map(params![repo_name, rel_path], |r| Ok(Chunk {
-            _id:        r.get(0)?,
-            repo_name:  r.get(1)?,
-            kind:       r.get(2)?,
-            name:       r.get(3)?,
-            start_line: r.get(4)?,
-            end_line:   r.get(5)?,
-            content:    r.get(6)?,
-            signature:  r.get(7)?,
-            rel_path:   r.get(8)?,
-        }))?.collect::<Result<Vec<_>, _>>()?;
+        let rows = stmt
+            .query_map(params![repo_name, rel_path], |r| {
+                Ok(Chunk {
+                    _id: r.get(0)?,
+                    repo_name: r.get(1)?,
+                    kind: r.get(2)?,
+                    name: r.get(3)?,
+                    start_line: r.get(4)?,
+                    end_line: r.get(5)?,
+                    content: r.get(6)?,
+                    signature: r.get(7)?,
+                    rel_path: r.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
     pub fn unembedded_chunks(&self, repo_name: &str) -> Result<Vec<(i64, String)>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, content FROM chunks WHERE repo_name=?1 AND embedding IS NULL"
-        )?;
-        let rows = stmt.query_map(params![repo_name], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = conn
+            .prepare("SELECT id, content FROM chunks WHERE repo_name=?1 AND embedding IS NULL")?;
+        let rows = stmt
+            .query_map(params![repo_name], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 }

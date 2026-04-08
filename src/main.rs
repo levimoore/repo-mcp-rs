@@ -45,6 +45,10 @@ enum Commands {
     Index {
         /// Index only this repo (default: all)
         name: Option<String>,
+        /// Embedding model to use for this run (overrides config).
+        /// E.g. AllMiniLML6V2, BGESmallENV15, NomicEmbedTextV15
+        #[arg(long, value_name = "MODEL")]
+        model: Option<String>,
     },
 
     /// Start the MCP server (foreground)
@@ -65,7 +69,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ConfigCommand {
-    /// Set a config value (e.g. `config set port 7777`)
+    /// Set a config value (e.g. `config set port 7777` or `config set embedding_model BGESmallENV15`)
     Set { key: String, value: String },
     /// Print the current config
     Show,
@@ -76,17 +80,17 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init          => cmd_init(),
+        Commands::Init => cmd_init(),
         Commands::Add { path, name } => cmd_add(path, name),
-        Commands::Remove { name }    => cmd_remove(name),
-        Commands::List               => cmd_list(),
-        Commands::Index { name }     => cmd_index(name).await,
-        Commands::Start              => cmd_start().await,
-        Commands::Stop               => cmd_stop(),
-        Commands::Status             => cmd_status(),
+        Commands::Remove { name } => cmd_remove(name),
+        Commands::List => cmd_list(),
+        Commands::Index { name, model } => cmd_index(name, model).await,
+        Commands::Start => cmd_start().await,
+        Commands::Stop => cmd_stop(),
+        Commands::Status => cmd_status(),
         Commands::Config { command } => match command {
             ConfigCommand::Set { key, value } => cmd_config_set(key, value),
-            ConfigCommand::Show               => cmd_config_show(),
+            ConfigCommand::Show => cmd_config_show(),
         },
     }
 }
@@ -141,7 +145,10 @@ fn cmd_remove(name: String) -> Result<()> {
     config.repos.retain(|r| r.name != name);
 
     if config.repos.len() == before {
-        anyhow::bail!("No repo named '{}'. Run 'repo-mcp list' to see what's registered.", name);
+        anyhow::bail!(
+            "No repo named '{}'. Run 'repo-mcp list' to see what's registered.",
+            name
+        );
     }
 
     config.save()?;
@@ -178,12 +185,15 @@ fn cmd_list() -> Result<()> {
     Ok(())
 }
 
-async fn cmd_index(name: Option<String>) -> Result<()> {
+async fn cmd_index(name: Option<String>, model: Option<String>) -> Result<()> {
     let config = Config::load()?;
 
     let repos: Vec<&RepoConfig> = match &name {
         Some(n) => {
-            let r = config.repos.iter().find(|r| &r.name == n)
+            let r = config
+                .repos
+                .iter()
+                .find(|r| &r.name == n)
                 .ok_or_else(|| anyhow::anyhow!("No repo named '{}'", n))?;
             vec![r]
         }
@@ -194,8 +204,11 @@ async fn cmd_index(name: Option<String>) -> Result<()> {
         anyhow::bail!("No repos registered. Run: repo-mcp add <path>");
     }
 
+    // --model flag overrides the persisted config value for this run only
+    let model_name = model.as_deref().unwrap_or(&config.embedding_model);
+
     let db = std::sync::Arc::new(db::Database::open()?);
-    let embedder = indexer::Embedder::init()?;
+    let embedder = indexer::Embedder::init(model_name)?;
     let vectors = std::sync::Arc::new(tokio::sync::RwLock::new(db::VectorStore::new()));
 
     for repo in repos {
@@ -219,9 +232,7 @@ async fn cmd_start() -> Result<()> {
     let config = Config::load()?;
 
     if config.repos.is_empty() {
-        anyhow::bail!(
-            "No repos registered.\n  repo-mcp add <path>  then  repo-mcp index"
-        );
+        anyhow::bail!("No repos registered.\n  repo-mcp add <path>  then  repo-mcp index");
     }
 
     write_pid(std::process::id())?;
@@ -262,7 +273,16 @@ fn cmd_status() -> Result<()> {
             println!("Status:  running");
             println!("PID:     {}", pid);
             println!("Port:    {}", config.port);
-            println!("Repos:   {}", config.repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "));
+            println!("Model:   {}", config.embedding_model);
+            println!(
+                "Repos:   {}",
+                config
+                    .repos
+                    .iter()
+                    .map(|r| r.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
             println!("Health:  http://localhost:{}/health", config.port);
         }
         _ => {
@@ -273,6 +293,9 @@ fn cmd_status() -> Result<()> {
 }
 
 fn cmd_config_set(key: String, value: String) -> Result<()> {
+    use fastembed::EmbeddingModel;
+    use std::str::FromStr as _;
+
     let mut config = Config::load()?;
     match key.as_str() {
         "port" => {
@@ -281,7 +304,16 @@ fn cmd_config_set(key: String, value: String) -> Result<()> {
             config.save()?;
             println!("✓ port = {}", port);
         }
-        _ => anyhow::bail!("Unknown key '{}'. Valid keys: port", key),
+        "embedding_model" => {
+            // Validate the model name before saving
+            EmbeddingModel::from_str(&value)
+                .map_err(|e| anyhow::anyhow!("Unknown embedding model '{}': {}\n  Run `repo-mcp index --model <MODEL>` to see available names.", value, e))?;
+            config.embedding_model = value.clone();
+            config.save()?;
+            println!("✓ embedding_model = {}", value);
+            println!("  Re-index your repos to apply: repo-mcp index");
+        }
+        _ => anyhow::bail!("Unknown key '{}'. Valid keys: port, embedding_model", key),
     }
     Ok(())
 }

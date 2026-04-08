@@ -23,7 +23,7 @@ use tools::{all_tools, execute_tool, AppState};
 
 #[derive(Debug, Deserialize)]
 struct RpcRequest {
-    id:     Option<Value>,
+    id: Option<Value>,
     method: String,
     params: Option<Value>,
 }
@@ -31,16 +31,16 @@ struct RpcRequest {
 #[derive(Debug, Serialize)]
 struct RpcResponse {
     jsonrpc: &'static str,
-    id:      Value,
+    id: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result:  Option<Value>,
+    result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error:   Option<RpcError>,
+    error: Option<RpcError>,
 }
 
 #[derive(Debug, Serialize)]
 struct RpcError {
-    code:    i32,
+    code: i32,
     message: String,
 }
 
@@ -51,7 +51,7 @@ type SessionSender = mpsc::UnboundedSender<Result<Event, Infallible>>;
 #[derive(Clone)]
 struct ServerState {
     sessions: Arc<RwLock<HashMap<String, SessionSender>>>,
-    app:      AppState,
+    app: AppState,
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ pub async fn start(config: Config) -> Result<()> {
     println!("\n  repo-mcp starting…\n");
 
     // Init embedder (downloads model on first run)
-    let embedder = Embedder::init()?;
+    let embedder = Embedder::init(&config.embedding_model)?;
 
     // Index all repos (skips unchanged files via mtime)
     for repo in &config.repos {
@@ -94,25 +94,26 @@ pub async fn start(config: Config) -> Result<()> {
         embedder.clone(),
         Arc::clone(&vectors),
         config.repos.clone(),
-    ).await?;
+    )
+    .await?;
 
     // Build app state
     let app_state = AppState {
-        db:      Arc::clone(&db),
+        db: Arc::clone(&db),
         embedder,
         vectors: Arc::clone(&vectors),
-        repos:   config.repos.clone(),
+        repos: config.repos.clone(),
     };
 
     let state = ServerState {
         sessions: Arc::new(RwLock::new(HashMap::new())),
-        app:      app_state,
+        app: app_state,
     };
 
     let router = Router::new()
         .route("/health", get(health))
-        .route("/sse",    get(sse_handler))
-        .route("/message",post(message_handler))
+        .route("/sse", get(sse_handler))
+        .route("/message", post(message_handler))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -127,7 +128,10 @@ pub async fn start(config: Config) -> Result<()> {
     println!("      \"servers\": {{");
     println!("        \"repo-mcp\": {{");
     println!("          \"type\": \"sse\",");
-    println!("          \"url\": \"http://localhost:{}/sse\"", config.port);
+    println!(
+        "          \"url\": \"http://localhost:{}/sse\"",
+        config.port
+    );
     println!("        }}");
     println!("      }}");
     println!("    }}");
@@ -142,10 +146,15 @@ pub async fn start(config: Config) -> Result<()> {
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn health(State(state): State<ServerState>) -> Json<Value> {
-    let repos: Vec<_> = state.app.repos.iter().map(|r| {
-        let count = state.app.db.chunk_count(&r.name).unwrap_or(0);
-        json!({ "name": r.name, "path": r.path, "chunks": count })
-    }).collect();
+    let repos: Vec<_> = state
+        .app
+        .repos
+        .iter()
+        .map(|r| {
+            let count = state.app.db.chunk_count(&r.name).unwrap_or(0);
+            json!({ "name": r.name, "path": r.path, "chunks": count })
+        })
+        .collect();
 
     let vector_count = state.app.vectors.read().await.len();
 
@@ -190,7 +199,7 @@ async fn message_handler(
     let sessions = state.sessions.read().await;
     let sender = match sessions.get(&params.session_id) {
         Some(s) => s.clone(),
-        None    => return StatusCode::BAD_REQUEST,
+        None => return StatusCode::BAD_REQUEST,
     };
     drop(sessions);
 
@@ -219,18 +228,27 @@ async fn handle_rpc(req: RpcRequest, sender: SessionSender, state: ServerState) 
         "initialized" | "notifications/initialized" => return, // no response
 
         "ping" => RpcResponse {
-            jsonrpc: "2.0", id, result: Some(json!({})), error: None,
+            jsonrpc: "2.0",
+            id,
+            result: Some(json!({})),
+            error: None,
         },
 
         "tools/list" => {
             let tools = all_tools(&state.app.repos);
-            let list: Vec<_> = tools.iter().map(|t| json!({
-                "name":        t.name,
-                "description": t.description,
-                "inputSchema": t.input_schema,
-            })).collect();
+            let list: Vec<_> = tools
+                .iter()
+                .map(|t| {
+                    json!({
+                        "name":        t.name,
+                        "description": t.description,
+                        "inputSchema": t.input_schema,
+                    })
+                })
+                .collect();
             RpcResponse {
-                jsonrpc: "2.0", id,
+                jsonrpc: "2.0",
+                id,
                 result: Some(json!({ "tools": list })),
                 error: None,
             }
@@ -245,17 +263,27 @@ async fn handle_rpc(req: RpcRequest, sender: SessionSender, state: ServerState) 
 
             match result {
                 Ok(v) => RpcResponse {
-                    jsonrpc: "2.0", id, result: Some(v), error: None,
+                    jsonrpc: "2.0",
+                    id,
+                    result: Some(v),
+                    error: None,
                 },
                 Err(e) => RpcResponse {
-                    jsonrpc: "2.0", id, result: None,
-                    error: Some(RpcError { code: -32603, message: e.to_string() }),
+                    jsonrpc: "2.0",
+                    id,
+                    result: None,
+                    error: Some(RpcError {
+                        code: -32603,
+                        message: e.to_string(),
+                    }),
                 },
             }
         }
 
         _ => RpcResponse {
-            jsonrpc: "2.0", id, result: None,
+            jsonrpc: "2.0",
+            id,
+            result: None,
             error: Some(RpcError {
                 code: -32601,
                 message: format!("Method not found: {}", req.method),

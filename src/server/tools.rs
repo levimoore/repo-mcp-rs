@@ -3,23 +3,27 @@ use serde_json::{json, Value};
 use std::{path::Path, sync::Arc};
 use tokio::sync::RwLock;
 
-use crate::{config::RepoConfig, db::{Database, VectorStore}, indexer::Embedder};
+use crate::{
+    config::RepoConfig,
+    db::{Database, VectorStore},
+    indexer::Embedder,
+};
 
 // ─── App state ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db:       Arc<Database>,
+    pub db: Arc<Database>,
     pub embedder: Embedder,
-    pub vectors:  Arc<RwLock<VectorStore>>,
-    pub repos:    Vec<RepoConfig>,
+    pub vectors: Arc<RwLock<VectorStore>>,
+    pub repos: Vec<RepoConfig>,
 }
 
 // ─── Tool descriptors ─────────────────────────────────────────────────────────
 
 pub struct Tool {
-    pub name:         String,
-    pub description:  String,
+    pub name: String,
+    pub description: String,
     pub input_schema: Value,
 }
 
@@ -175,13 +179,13 @@ pub async fn execute_tool(state: &AppState, tool_name: &str, args: &Value) -> Re
     };
 
     match verb {
-        "semantic_search"  => semantic_search(state, repo, args).await,
-        "find_symbol"      => find_symbol(state, repo, args).await,
-        "find_references"  => find_references(state, repo, args).await,
-        "get_outline"      => get_outline(state, repo, args).await,
+        "semantic_search" => semantic_search(state, repo, args).await,
+        "find_symbol" => find_symbol(state, repo, args).await,
+        "find_references" => find_references(state, repo, args).await,
+        "get_outline" => get_outline(state, repo, args).await,
         "get_file_summary" => get_file_summary(state, repo, args).await,
-        "read_file"        => read_file(state, repo, args).await,
-        _                  => Ok(tool_error(&format!("Unknown tool '{}'", tool_name))),
+        "read_file" => read_file(state, repo, args).await,
+        _ => Ok(tool_error(&format!("Unknown tool '{}'", tool_name))),
     }
 }
 
@@ -196,7 +200,8 @@ fn tool_error(msg: &str) -> Value {
 }
 
 fn numbered(lines: &[&str], start: usize) -> String {
-    lines.iter()
+    lines
+        .iter()
         .enumerate()
         .map(|(i, l)| format!("{:5}  {}", start + i, l))
         .collect::<Vec<_>>()
@@ -204,7 +209,9 @@ fn numbered(lines: &[&str], start: usize) -> String {
 }
 
 fn safe_path(repo_path: &str, rel: &str) -> Result<std::path::PathBuf> {
-    let full = Path::new(repo_path).join(rel).canonicalize()
+    let full = Path::new(repo_path)
+        .join(rel)
+        .canonicalize()
         .unwrap_or_else(|_| Path::new(repo_path).join(rel));
     if !full.starts_with(repo_path) {
         anyhow::bail!("Path '{}' escapes repo root", rel);
@@ -218,7 +225,9 @@ async fn semantic_search(state: &AppState, repo: &RepoConfig, args: &Value) -> R
     let query = args["query"].as_str().unwrap_or("").to_string();
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
-    if query.is_empty() { return Ok(tool_error("query is required")); }
+    if query.is_empty() {
+        return Ok(tool_error("query is required"));
+    }
 
     let embeddings = state.embedder.embed(vec![query.clone()]).await?;
     let q_emb = &embeddings[0];
@@ -227,25 +236,32 @@ async fn semantic_search(state: &AppState, repo: &RepoConfig, args: &Value) -> R
 
     let mut output = Vec::new();
     for (chunk_id, _score) in candidates {
-        let Some(chunk) = state.db.get_chunk(chunk_id)? else { continue };
-        if chunk.repo_name != repo.name { continue; }
+        let Some(chunk) = state.db.get_chunk(chunk_id)? else {
+            continue;
+        };
+        if chunk.repo_name != repo.name {
+            continue;
+        }
 
         // Show signature if available, otherwise show first few lines of content
-        let display = chunk.signature.as_deref().unwrap_or_else(|| {
-            chunk.content.lines().next().unwrap_or("")
-        });
+        let display = chunk
+            .signature
+            .as_deref()
+            .unwrap_or_else(|| chunk.content.lines().next().unwrap_or(""));
 
         output.push(format!(
             "── {path}:{start}-{end}  [{kind}] {name}\n   {sig}",
-            path  = chunk.rel_path,
+            path = chunk.rel_path,
             start = chunk.start_line,
-            end   = chunk.end_line,
-            kind  = chunk.kind,
-            name  = chunk.name.as_deref().unwrap_or(""),
-            sig   = display,
+            end = chunk.end_line,
+            kind = chunk.kind,
+            name = chunk.name.as_deref().unwrap_or(""),
+            sig = display,
         ));
 
-        if output.len() >= limit { break; }
+        if output.len() >= limit {
+            break;
+        }
     }
 
     if output.is_empty() {
@@ -262,7 +278,9 @@ async fn semantic_search(state: &AppState, repo: &RepoConfig, args: &Value) -> R
 
 async fn find_symbol(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<Value> {
     let name = args["name"].as_str().unwrap_or("");
-    if name.is_empty() { return Ok(tool_error("name is required")); }
+    if name.is_empty() {
+        return Ok(tool_error("name is required"));
+    }
 
     let chunks = state.db.find_symbol(&repo.name, name)?;
 
@@ -277,10 +295,10 @@ async fn find_symbol(state: &AppState, repo: &RepoConfig, args: &Value) -> Resul
     for c in &chunks {
         parts.push(format!(
             "── {path}:{start}-{end}  [{kind}]\n{content}",
-            path    = c.rel_path,
-            start   = c.start_line,
-            end     = c.end_line,
-            kind    = c.kind,
+            path = c.rel_path,
+            start = c.start_line,
+            end = c.end_line,
+            kind = c.kind,
             content = c.content,
         ));
     }
@@ -292,9 +310,11 @@ async fn find_symbol(state: &AppState, repo: &RepoConfig, args: &Value) -> Resul
 
 async fn find_references(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<Value> {
     let symbol = args["symbol"].as_str().unwrap_or("");
-    let limit  = args["limit"].as_u64().unwrap_or(10) as usize;
+    let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
-    if symbol.is_empty() { return Ok(tool_error("symbol is required")); }
+    if symbol.is_empty() {
+        return Ok(tool_error("symbol is required"));
+    }
 
     let chunks = state.db.find_references(&repo.name, symbol)?;
 
@@ -310,20 +330,26 @@ async fn find_references(state: &AppState, repo: &RepoConfig, args: &Value) -> R
 
     let mut parts = vec![format!(
         "{} reference(s) to '{}' in {}{}:\n",
-        total, symbol, repo.name,
-        if total > limit { format!(" (showing first {})", limit) } else { String::new() }
+        total,
+        symbol,
+        repo.name,
+        if total > limit {
+            format!(" (showing first {})", limit)
+        } else {
+            String::new()
+        }
     )];
 
     for c in chunks.into_iter().take(limit) {
         let caller = c.name.as_deref().unwrap_or("(anonymous)");
         parts.push(format!(
             "── {path}:{start}-{end}  [{kind}] {caller}\n   {sig}",
-            path   = c.rel_path,
-            start  = c.start_line,
-            end    = c.end_line,
-            kind   = c.kind,
+            path = c.rel_path,
+            start = c.start_line,
+            end = c.end_line,
+            kind = c.kind,
             caller = caller,
-            sig    = c.signature.as_deref().unwrap_or(""),
+            sig = c.signature.as_deref().unwrap_or(""),
         ));
     }
 
@@ -334,7 +360,9 @@ async fn find_references(state: &AppState, repo: &RepoConfig, args: &Value) -> R
 
 async fn get_outline(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<Value> {
     let path = args["path"].as_str().unwrap_or("");
-    if path.is_empty() { return Ok(tool_error("path is required")); }
+    if path.is_empty() {
+        return Ok(tool_error("path is required"));
+    }
 
     let chunks = state.db.chunks_for_file(&repo.name, path)?;
 
@@ -356,7 +384,9 @@ async fn get_outline(state: &AppState, repo: &RepoConfig, args: &Value) -> Resul
     ];
 
     for c in &chunks {
-        let sig = c.signature.as_deref()
+        let sig = c
+            .signature
+            .as_deref()
             .or(c.name.as_deref())
             .unwrap_or("(anonymous)");
         lines.push(format!(
@@ -374,10 +404,12 @@ async fn get_outline(state: &AppState, repo: &RepoConfig, args: &Value) -> Resul
 
 async fn get_file_summary(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<Value> {
     let path = args["path"].as_str().unwrap_or("");
-    if path.is_empty() { return Ok(tool_error("path is required")); }
+    if path.is_empty() {
+        return Ok(tool_error("path is required"));
+    }
 
     let summary = state.db.get_file_summary(&repo.name, path)?;
-    let chunks  = state.db.chunks_for_file(&repo.name, path)?;
+    let chunks = state.db.chunks_for_file(&repo.name, path)?;
 
     if summary.is_none() && chunks.is_empty() {
         let full = safe_path(&repo.path, path)?;
@@ -420,15 +452,17 @@ async fn get_file_summary(state: &AppState, repo: &RepoConfig, args: &Value) -> 
 // ─── read_file ────────────────────────────────────────────────────────────────
 
 const FULL_THRESHOLD: usize = 200;
-const HEAD_LINES:     usize = 100;
+const HEAD_LINES: usize = 100;
 
 async fn read_file(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<Value> {
     let rel = args["path"].as_str().unwrap_or("");
-    if rel.is_empty() { return Ok(tool_error("path is required")); }
+    if rel.is_empty() {
+        return Ok(tool_error("path is required"));
+    }
 
     let full = safe_path(&repo.path, rel)?;
     let source = match std::fs::read_to_string(&full) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(e) => return Ok(tool_error(&format!("Cannot read {}: {}", rel, e))),
     };
 
@@ -437,12 +471,20 @@ async fn read_file(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<
 
     // If a range is requested, return exactly those lines (no truncation).
     if args["start_line"].is_number() || args["end_line"].is_number() {
-        let start = args["start_line"].as_u64().map(|n| (n as usize).saturating_sub(1)).unwrap_or(0);
-        let end   = args["end_line"].as_u64().map(|n| (n as usize).min(total)).unwrap_or(total);
+        let start = args["start_line"]
+            .as_u64()
+            .map(|n| (n as usize).saturating_sub(1))
+            .unwrap_or(0);
+        let end = args["end_line"]
+            .as_u64()
+            .map(|n| (n as usize).min(total))
+            .unwrap_or(total);
 
         if start >= total {
             return Ok(tool_error(&format!(
-                "start_line {} is beyond end of file ({} lines)", start + 1, total
+                "start_line {} is beyond end of file ({} lines)",
+                start + 1,
+                total
             )));
         }
         let slice = &lines[start..end];
@@ -454,20 +496,26 @@ async fn read_file(state: &AppState, repo: &RepoConfig, args: &Value) -> Result<
     }
 
     // Large file: head + index-powered symbol map of the tail
-    let head      = numbered(&lines[..HEAD_LINES], 1);
+    let head = numbered(&lines[..HEAD_LINES], 1);
     let remaining = total - HEAD_LINES;
 
     // Pull tail symbols from the index
-    let tail_symbols: Vec<String> = state.db
+    let tail_symbols: Vec<String> = state
+        .db
         .chunks_for_file(&repo.name, rel)
         .unwrap_or_default()
         .into_iter()
         .filter(|c| c.start_line as usize > HEAD_LINES)
         .map(|c| {
-            let sig = c.signature.as_deref()
+            let sig = c
+                .signature
+                .as_deref()
                 .or(c.name.as_deref())
                 .unwrap_or("(anonymous)");
-            format!("  {:5}-{:<5}  [{:<10}]  {}", c.start_line, c.end_line, c.kind, sig)
+            format!(
+                "  {:5}-{:<5}  [{:<10}]  {}",
+                c.start_line, c.end_line, c.kind, sig
+            )
         })
         .collect();
 
